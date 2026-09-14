@@ -15,12 +15,14 @@ sidebar.pack_propagate(False)
 canvas = tk.Canvas(root, bg="black")
 canvas.pack(side="right", fill="both", expand=True)
 
+
 def node_clicked(event):
     item = canvas.find_withtag("current")
 
     tags = canvas.gettags(item)
 
     print(tags)
+
 
 def canvas_clicked(event):
     global selected_tool
@@ -39,15 +41,10 @@ def canvas_clicked(event):
             event.x + 30,
             event.y + 20,
             fill="lightblue",
-            tags=("node", node_tag)
+            tags=("node", node_tag),
         )
 
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Host",
-            tags=("node", node_tag)            
-        )
+        canvas.create_text(event.x, event.y, text="Host", tags=("node", node_tag))
 
     elif selected_tool == "switch":
         canvas.create_rectangle(
@@ -56,15 +53,10 @@ def canvas_clicked(event):
             event.x + 30,
             event.y + 20,
             fill="lightblue",
-            tags=("node", node_tag)
+            tags=("node", node_tag),
         )
 
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Switch",
-            tags=("node", node_tag)
-        )
+        canvas.create_text(event.x, event.y, text="Switch", tags=("node", node_tag))
 
     elif selected_tool == "router":
         canvas.create_rectangle(
@@ -73,42 +65,28 @@ def canvas_clicked(event):
             event.x + 30,
             event.y + 20,
             fill="lightblue",
-            tags=("node", node_tag)
+            tags=("node", node_tag),
         )
 
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Router",
-            tags=("node", node_tag)
-        )
+        canvas.create_text(event.x, event.y, text="Router", tags=("node", node_tag))
 
     selected_tool = None
 
+
 canvas.bind("<Button-1>", canvas_clicked)
 canvas.tag_bind("node", "<Button-1>", node_clicked)
+
 
 def select_tool(tool):
     global selected_tool
     selected_tool = tool
     print(tool, " placement mode")
 
-host_button = tk.Button(
-    sidebar, 
-    text="Host",
-    command=lambda: select_tool("host")
-)
-switch_button = tk.Button(
-    sidebar, 
-    text="Switch",
-    command=lambda: select_tool("switch")
-)
 
-router_button = tk.Button(
-    sidebar, 
-    text="Router",
-    command=lambda: select_tool("router")
-)
+host_button = tk.Button(sidebar, text="Host", command=lambda: select_tool("host"))
+switch_button = tk.Button(sidebar, text="Switch", command=lambda: select_tool("switch"))
+
+router_button = tk.Button(sidebar, text="Router", command=lambda: select_tool("router"))
 
 host_button.pack(fill="x", padx=10, pady=10)
 switch_button.pack(fill="x", padx=10, pady=10)

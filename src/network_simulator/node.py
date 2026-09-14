@@ -15,23 +15,20 @@ class Node(ABC):
         # Stores received frames before processing.
         self.rx_buffer: defaultdict[Interface, list[Frame]] = defaultdict(list)
 
-        self.interfaces: dict[Interface, Interface | None] = {}  
+        self.interfaces: dict[Interface, Interface | None] = {}
         self.port_map: dict[int, Interface] = {}
 
         # Stores outbound packets/frames before transmission.
-        self.tx_buffer: list[Packet | Frame] = []  
+        self.tx_buffer: list[Packet | Frame] = []
 
     def add_connection(
-            self, 
-            self_interface_id: int, 
-            other_node: "Node",
-            other_interface_id: int
-            ) -> None:
+        self, self_interface_id: int, other_node: "Node", other_interface_id: int
+    ) -> None:
         """Connect the interface of one node to the interface of another node."""
         # Connections are formed bidirectionally, so either node can initiate a complete connection
         self_interface = self.port_map[self_interface_id]
         other_interface = other_node.port_map[other_interface_id]
-        
+
         self.interfaces[self_interface] = other_interface
         other_node.interfaces[other_interface] = self_interface
 
@@ -58,8 +55,7 @@ class Node(ABC):
         for self_interface, other_interface in self.interfaces.items():
             other_node_name = other_interface.node.name if other_interface else None
             connections.append(
-                f"Port {self_interface.id} -> {other_node_name}\n"
-                f"{self_interface}"
+                f"Port {self_interface.id} -> {other_node_name}\n{self_interface}"
             )
 
         return "\n".join(connections)

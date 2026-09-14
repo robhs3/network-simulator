@@ -13,13 +13,20 @@ if __name__ == "__main__":
     PC2 = Host("PC2", 1)
     SW2 = Switch("SW2", 4)
 
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("10.0.1.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
+    PC1.assign_all_int_attributes(
+        0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254")
+    )
+    PC2.assign_all_int_attributes(
+        0, "bbbb.bbbb.bbbb", IP("10.0.1.1"), IP("255.255.255.0"), IP("192.168.2.254")
+    )
 
     R1 = Router("R1", 4)
-    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
-    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0"))
+    R1.assign_all_int_attributes(
+        0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0")
+    )
+    R1.assign_all_int_attributes(
+        1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0")
+    )
 
     PC1.add_connection(0, SW1, 0)
     PC2.add_connection(0, SW2, 0)

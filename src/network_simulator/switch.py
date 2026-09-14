@@ -2,10 +2,11 @@ from network_simulator.node import Node
 from network_simulator.interface import Access_Interface, Trunk_Interface
 from network_simulator.other import Dot1q_Frame, Frame
 
+
 class Switch(Node):
     def __init__(self, name, num_ports):
         super().__init__(name, num_ports)
-        self.mac_table = {} # {mac : (interface, vlan_id)}
+        self.mac_table = {}  # {mac : (interface, vlan_id)}
         self.vlans = set()
 
         # Initialize all ports with empty interface attributes, no connections, and default vlan configuration
@@ -36,16 +37,25 @@ class Switch(Node):
 
         self.mac_table[frame.source_mac] = (ingress_interface, vid)
 
-        if frame.dest_mac in self.mac_table and self.mac_table[frame.dest_mac][1] == vid:
+        if (
+            frame.dest_mac in self.mac_table
+            and self.mac_table[frame.dest_mac][1] == vid
+        ):
             self.process_frame_out(frame, self.mac_table[frame.dest_mac][0], vid)
         else:
             for self_interface, other_interface in self.interfaces.items():
                 if isinstance(self_interface, Access_Interface):
-                    if self_interface != ingress_interface and self_interface.vlan_id == vid:
+                    if (
+                        self_interface != ingress_interface
+                        and self_interface.vlan_id == vid
+                    ):
                         self.tx(frame, self_interface)
 
                 if isinstance(self_interface, Trunk_Interface):
-                    if self_interface != ingress_interface and vid in self_interface.allowed_vlans:
+                    if (
+                        self_interface != ingress_interface
+                        and vid in self_interface.allowed_vlans
+                    ):
                         self.process_frame_out(frame, self_interface, vid)
 
     def process_frame_out(self, frame, egress_interface, vid):
@@ -76,13 +86,14 @@ class Switch(Node):
         interface.native_vlan = vlan_id
         interface.allowed_vlans.add(vlan_id)
 
-        
     def flood(self, frame, ingress_interface):
         if isinstance(ingress_interface, Access_Interface):
             # Iterate through all connections
             for self_interface, other_interface in self.interfaces.items():
                 # Transmit frame out of all interfaces with same VLAN ID except the ingress interface it was received on
-                if self_interface.vlan_id == ingress_interface.vlan_id \
-                    and self_interface.id != ingress_interface.id \
-                    and other_interface is not None:
+                if (
+                    self_interface.vlan_id == ingress_interface.vlan_id
+                    and self_interface.id != ingress_interface.id
+                    and other_interface is not None
+                ):
                     self.tx(frame, self_interface)

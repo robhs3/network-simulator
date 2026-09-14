@@ -43,10 +43,7 @@ def build_snapshot():
 
 
 def get_modification_state():
-    return {
-        file: file.stat().st_mtime_ns
-        for file in get_python_files()
-    }
+    return {file: file.stat().st_mtime_ns for file in get_python_files()}
 
 
 def main():
