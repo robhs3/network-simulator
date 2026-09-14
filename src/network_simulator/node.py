@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from interface import Interface
-from other import Frame, IP, Packet
+from network_simulator.interface import Interface
+from network_simulator.other import Frame, IP, Packet
 
 
 class Node(ABC):

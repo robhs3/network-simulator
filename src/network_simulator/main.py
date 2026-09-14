@@ -1,8 +1,8 @@
-from host import Host
-from switch import Switch
-from router import Router
-from other import IP
-from node import Node
+from network_simulator.host import Host
+from network_simulator.switch import Switch
+from network_simulator.router import Router
+from network_simulator.other import IP
+from network_simulator.node import Node
 
 if __name__ == "__main__":
     # LAN 1

@@ -1,6 +1,6 @@
-from node import Node
-from interface import Access_Interface, Trunk_Interface
-from other import Dot1q_Frame, Frame
+from network_simulator.node import Node
+from network_simulator.interface import Access_Interface, Trunk_Interface
+from network_simulator.other import Dot1q_Frame, Frame
 
 class Switch(Node):
     def __init__(self, name, num_ports):

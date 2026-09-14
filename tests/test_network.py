@@ -1,8 +1,8 @@
-from node import Node
-from other import *
-from host import Host
-from router import Router
-from switch import Switch
+from network_simulator.node import Node
+from network_simulator.other import *
+from network_simulator.host import Host
+from network_simulator.router import Router
+from network_simulator.switch import Switch
 import pytest
 
 

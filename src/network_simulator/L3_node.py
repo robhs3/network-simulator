@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 
-from interface import Interface
-from node import Node
-from other import ARP_Reply, ARP_Request, Frame, IP, Packet
+from network_simulator.interface import Interface
+from network_simulator.node import Node
+from network_simulator.other import ARP_Reply, ARP_Request, Frame, IP, Packet
 
 
 class L3_Node(Node, ABC):
