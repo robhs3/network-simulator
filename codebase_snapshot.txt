@@ -1,0 +1,956 @@
+================================================================================
+FILE: gui.py
+================================================================================
+
+import tkinter as tk
+
+root = tk.Tk()
+
+root.title("Network Simulator")
+root.geometry("1000x700")
+
+selected_tool = None
+node_count = 0
+
+sidebar = tk.Frame(root, width=150, bg="darkgray")
+sidebar.pack(side="left", fill="y")
+sidebar.pack_propagate(False)
+
+canvas = tk.Canvas(root, bg="black")
+canvas.pack(side="right", fill="both", expand=True)
+
+def node_clicked(event):
+    item = canvas.find_withtag("current")
+
+    tags = canvas.gettags(item)
+
+    print(tags)
+
+def canvas_clicked(event):
+    global selected_tool
+    global node_count
+
+    if selected_tool is None:
+        return
+
+    node_count += 1
+    node_tag = f"node_{node_count}"
+
+    if selected_tool == "host":
+        canvas.create_rectangle(
+            event.x - 30,
+            event.y - 20,
+            event.x + 30,
+            event.y + 20,
+            fill="lightblue",
+            tags=("node", node_tag)
+        )
+
+        canvas.create_text(
+            event.x,
+            event.y,
+            text="Host",
+            tags=("node", node_tag)            
+        )
+
+    elif selected_tool == "switch":
+        canvas.create_rectangle(
+            event.x - 30,
+            event.y - 20,
+            event.x + 30,
+            event.y + 20,
+            fill="lightblue",
+            tags=("node", node_tag)
+        )
+
+        canvas.create_text(
+            event.x,
+            event.y,
+            text="Switch",
+            tags=("node", node_tag)
+        )
+
+    elif selected_tool == "router":
+        canvas.create_rectangle(
+            event.x - 30,
+            event.y - 20,
+            event.x + 30,
+            event.y + 20,
+            fill="lightblue",
+            tags=("node", node_tag)
+        )
+
+        canvas.create_text(
+            event.x,
+            event.y,
+            text="Router",
+            tags=("node", node_tag)
+        )
+
+    selected_tool = None
+
+canvas.bind("<Button-1>", canvas_clicked)
+canvas.tag_bind("node", "<Button-1>", node_clicked)
+
+def select_tool(tool):
+    global selected_tool
+    selected_tool = tool
+    print(tool, " placement mode")
+
+host_button = tk.Button(
+    sidebar, 
+    text="Host",
+    command=lambda: select_tool("host")
+)
+switch_button = tk.Button(
+    sidebar, 
+    text="Switch",
+    command=lambda: select_tool("switch")
+)
+
+router_button = tk.Button(
+    sidebar, 
+    text="Router",
+    command=lambda: select_tool("router")
+)
+
+host_button.pack(fill="x", padx=10, pady=10)
+switch_button.pack(fill="x", padx=10, pady=10)
+router_button.pack(fill="x", padx=10, pady=10)
+
+
+root.mainloop()
+
+================================================================================
+FILE: host.py
+================================================================================
+
+from L3_node import L3_Node
+from other import *
+from interface import Host_Interface
+
+class Host(L3_Node):
+    def __init__(self, name, num_ports):
+        super().__init__(name, num_ports)
+        self._configurable_interface_attributes = ["mac", "ip", "netmask", "gateway"]
+
+        # Initialize all ports with empty interface attributes and empty connections
+        for i in range(num_ports):
+            interface = Host_Interface(i, self)
+            self.interfaces[interface] = None
+            self.port_map[i] = interface
+
+    @property
+    def configurable_interface_attributes(self):
+         return self._configurable_interface_attributes
+
+    # Send a raw message that is processed down the OSI stack. Tests for end-to-end communication
+    def send_message(self, payload, egress_interface_id, dest_ip):
+        # Find egress interface from id
+        egress_interface = self.port_map[egress_interface_id]
+
+        packet = Packet(payload, egress_interface.ip, dest_ip)
+
+        # Case 1: Source and destination node on same subnet
+        if self.is_same_subnet(egress_interface.ip, egress_interface.netmask, dest_ip) == True:
+            next_hop_ip = dest_ip
+        # Case 2: Source and destination node on different subnets
+        else:
+            next_hop_ip = egress_interface.gateway
+
+        # Case 1: Source knows destination MAC.
+        if next_hop_ip in self.arp_table:
+            # Encapsulate and transmit
+                frame = Frame(packet, egress_interface.mac, self.arp_table[next_hop_ip])
+                self.tx(frame, egress_interface)
+        # Case 2: Source does not know destination MAC
+        else:
+            # ARP discovery, then encapsulate and transmit
+            self.tx_buffer.append(packet)
+            arp_request = ARP_Request(egress_interface.ip, next_hop_ip, egress_interface.mac, "00:00:00:00:00:00")
+            frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
+            self.tx(frame, egress_interface)
+
+            if next_hop_ip in self.arp_table:
+                frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[next_hop_ip])
+                self.tx(frame, egress_interface)
+        
+    def receive_packet(self, payload, ingress_interface):
+            pass
+
+================================================================================
+FILE: interface.py
+================================================================================
+
+# Represents an interface on a node
+class Interface:
+    """Represents an interface that appears on any and all nodes."""
+
+    def __init__(self, id, node):
+        self.id = id
+        self.node = node
+        self.mac = None
+    
+    def __str__(self):
+        return(f"\tMAC: {self.mac}")
+
+    def __repr__(self):
+        return f"{self.node.name} {self.id}"
+
+
+class Router_Interface(Interface):
+    """Represents an interface that appears on a router."""
+
+    def __init__(self, id, node):
+        super().__init__(id, node)
+        self.ip = None
+        self.netmask = None
+
+
+class Host_Interface(Router_Interface):
+    """Represents an interface that appears on a host."""
+    def __init__(self, id, node):
+        super().__init__(id, node)
+        self.gateway = None
+
+class Switchport(Interface):
+    def __init__(self, id, node):
+        super().__init__(id, node)
+        self.vlan_ids = set(1)
+
+class Access_Interface(Interface):
+    """Represents an access interface on a switch."""
+    def __init__(self, id, node):
+        super().__init__(id, node)
+        self.vlan_id = 1
+
+
+class Trunk_Interface(Interface):
+    """Represents a trunk interface on a switch."""
+    def __init__(self, id, node):
+        super().__init__(id, node)
+        self.native_vlan = 1
+        self.allowed_vlans = set(range(1, 4095))
+
+
+    
+
+================================================================================
+FILE: L3_node.py
+================================================================================
+
+from abc import ABC, abstractmethod
+
+from interface import Interface
+from node import Node
+from other import ARP_Reply, ARP_Request, Frame, IP, Packet
+
+
+class L3_Node(Node, ABC):
+    """Represents a layer 3 node in a network."""
+
+    def __init__(self, name: str, num_ports: int):
+        super().__init__(name, num_ports)
+        self.arp_table: dict[IP, str] = {}
+
+    @property
+    @abstractmethod
+    def configurable_interface_attributes(self) -> list[str]:
+        """Get the list of attributes that can be configured on a layer 3 interface."""
+        ...
+
+    def is_same_subnet(self, source_ip: IP, netmask: IP, dest_ip: IP) -> bool:
+        """Return True if two IP addresses are on the same subnet, given a netmask."""
+        return self.derive_network_address(source_ip, netmask) == self.derive_network_address(dest_ip, netmask)
+    
+    def derive_network_address(self, ip: IP, netmask: IP) -> IP:
+        """Return the network address of an IP address's subnet, given its netmask."""
+        return IP(".".join(str(ip_octet & netmask_octet) for ip_octet, netmask_octet in zip(ip.octets, netmask.octets)))
+
+    def process_frame_in(self, frame: Frame, ingress_interface: Interface) -> None:
+        """Begin processing the received frame based on its payload."""
+        if frame.dest_mac == ingress_interface.mac or frame.dest_mac == "ff:ff:ff:ff:ff:ff":
+            payload = frame.payload
+
+            match payload:
+                case ARP_Request():
+                    self.receive_arp_request(payload, ingress_interface)
+                case ARP_Reply():
+                    self.receive_arp_reply(payload, ingress_interface)
+                case Packet():
+                    self.receive_packet(payload, ingress_interface)
+
+    def receive_arp_reply(self, arp_reply: ARP_Reply, ingress_interface: Interface):
+        """Process a received ARP Reply message."""
+        self.rx_buffer[ingress_interface].pop()
+        self.arp_table[arp_reply.source_ip] = arp_reply.source_mac
+
+    def receive_arp_request(self, arp_request: ARP_Request, ingress_interface: Interface):
+        """Process a received ARP Request message."""
+        self.rx_buffer[ingress_interface].pop()
+
+        if arp_request.dest_ip == ingress_interface.ip:
+            self.arp_table[arp_request.source_ip] = arp_request.source_mac
+            arp_reply = ARP_Reply(ingress_interface.ip, arp_request.source_ip, ingress_interface.mac, arp_request.source_mac)
+            frame = Frame(arp_reply, ingress_interface.mac, arp_request.source_mac)
+            self.tx(frame, ingress_interface)
+
+    @abstractmethod
+    def receive_packet(self, packet: Packet, ingress_interface: Interface):
+        """Process a received packet according to layer 3 node type."""
+        ...
+
+    def assign_all_int_attributes(self, interface_id, *attrs):
+        """Assign all attributes to an interface according to the layer 3 node type."""
+        interface = self.port_map[interface_id]
+        for attribute_type, attribute_value in zip(self.configurable_interface_attributes, attrs):
+            setattr(interface, attribute_type, attribute_value)
+
+    def __str__(self):
+        connection_string = ""
+
+        for self_interface, other_interface in self.interfaces.items():
+            connection_string += f"\n\tPort {self_interface.id} -> {other_interface.node.name if other_interface is not None else None}\t\n{self_interface}\n"
+        
+        return (
+            f"Name: {self.name}\n"
+            f"Interfaces: {connection_string}"
+            f"RX Buffer: {self.rx_buffer}\n"
+        )
+
+    def __repr__(self):
+        return(f"{self.name}")
+
+================================================================================
+FILE: main.py
+================================================================================
+
+from host import Host
+from switch import Switch
+from router import Router
+from other import IP
+from node import Node
+
+if __name__ == "__main__":
+    # LAN 1
+    PC1 = Host("PC3", 1)
+    SW1 = Switch("SW1", 8)
+
+    # LAN 2
+    PC2 = Host("PC2", 1)
+    SW2 = Switch("SW2", 4)
+
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("10.0.1.1"), IP("255.255.255.0"), IP("192.168.2.254"))
+
+
+    R1 = Router("R1", 4)
+    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
+    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0"))
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW2, 0)
+
+    SW1.add_connection(1, R1, 0)
+    SW2.add_connection(1, R1, 1)
+
+    PC1.send_message("test", 0, IP("192.168.2.1"))
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
+
+================================================================================
+FILE: node.py
+================================================================================
+
+from abc import ABC, abstractmethod
+from collections import defaultdict
+
+from interface import Interface
+from other import Frame, IP, Packet
+
+
+class Node(ABC):
+    """Represents a node in a network: host, switch, router, etc."""
+
+    def __init__(self, name: str, num_ports: int) -> None:
+        self.name = name
+        self.num_ports = num_ports
+
+        # Stores received frames before processing.
+        self.rx_buffer: defaultdict[Interface, list[Frame]] = defaultdict(list)
+
+        self.interfaces: dict[Interface, Interface | None] = {}  
+        self.port_map: dict[int, Interface] = {}
+
+        # Stores outbound packets/frames before transmission.
+        self.tx_buffer: list[Packet | Frame] = []  
+
+    def add_connection(
+            self, 
+            self_interface_id: int, 
+            other_node: "Node",
+            other_interface_id: int
+            ) -> None:
+        """Connect the interface of one node to the interface of another node."""
+        # Connections are formed bidirectionally, so either node can initiate a complete connection
+        self_interface = self.port_map[self_interface_id]
+        other_interface = other_node.port_map[other_interface_id]
+        
+        self.interfaces[self_interface] = other_interface
+        other_node.interfaces[other_interface] = self_interface
+
+    def rx(self, frame: Frame, ingress_interface: Interface) -> None:
+        """Receive a frame on a specified ingress interface."""
+        self.rx_buffer[ingress_interface].append(frame)
+        self.process_frame_in(frame, ingress_interface)
+
+    def tx(self, frame: Frame, egress_interface: Interface) -> None:
+        """Transmit a frame out of a specified egress interface."""
+        for self_interface, other_interface in self.interfaces.items():
+            if self_interface == egress_interface and other_interface is not None:
+                other_interface.node.rx(frame, other_interface)
+
+    @abstractmethod
+    def process_frame_in(self, frame: Frame, ingress_interface: Interface) -> None:
+        """Begin processing the received frame according to node type."""
+        ...
+
+    def __str__(self) -> str:
+        """Display node information."""
+        connections = []
+
+        for self_interface, other_interface in self.interfaces.items():
+            other_node_name = other_interface.node.name if other_interface else None
+            connections.append(
+                f"Port {self_interface.id} -> {other_node_name}\n"
+                f"{self_interface}"
+            )
+
+        return "\n".join(connections)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.name!r})"
+
+================================================================================
+FILE: other.py
+================================================================================
+
+class Route:
+    def __init__(self, type, dest_ip, dest_netmask, interface):
+        self.type = type
+        self.dest_ip = dest_ip
+        self.dest_netmask = dest_netmask
+        self.interface = interface
+        self.next_hop_ip = None
+
+    def __str__(self):
+        return (
+            f"Type: {self.type}, Destination: {self.dest_ip}, Netmask: {self.dest_netmask}, Interface: {self.interface.id}"
+        )
+
+class IP:
+    def __init__(self, ip_string):
+        self._octets = []
+        for octet_string in ip_string.split("."):
+            self._octets.append(int(octet_string))
+        self._ip_string = ip_string
+
+    @property
+    def octets(self):
+        return self._octets
+
+    def __str__(self):
+        return self._ip_string
+
+    def __eq__(self, other):
+        if isinstance(other, IP):
+            return self._ip_string == other._ip_string
+        return False
+
+    def __hash__(self):
+        return hash(self._ip_string)
+
+    def __repr__(self):
+        return f"{self._ip_string}"
+
+
+class PDU:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+class Segment(PDU):
+    def __init__(self, payload, source_port, dest_port):
+        super().__init__(payload)
+        self.source_port = source_port
+        self.dest_port = dest_port
+
+
+class Packet(PDU):
+    def __init__(self, payload, source_ip, dest_ip):
+        super().__init__(payload)
+        self.source_ip = source_ip
+        self.dest_ip = dest_ip
+
+
+class Frame(PDU):
+    def __init__(self, payload, source_mac, dest_mac):
+        super().__init__(payload)
+        self.source_mac = source_mac
+        self.dest_mac = dest_mac
+        self.payload = payload
+
+    def __str__(self):
+        return (
+            f"Payload: {self.payload}\n"
+            f"Source Mac: {self.source_mac}\n"
+            f"Destination Mac: {self.dest_mac}"
+        )
+
+class Dot1q_Frame(Frame):
+    def __init__(self, payload, source_mac, dest_mac, vlan_tag):
+        super().__init__(payload, source_mac, dest_mac)
+        self.vlan_tag = vlan_tag
+
+
+class ARP_Object:
+    def __init__(self, source_ip, dest_ip, source_mac, dest_mac):
+        self.source_ip = source_ip
+        self.dest_ip = dest_ip
+        self.source_mac = source_mac
+        self.dest_mac = dest_mac
+    
+
+class ARP_Request(ARP_Object):
+    def __init__(self, source_ip, dest_ip, source_mac, dest_mac):
+        super().__init__(source_ip, dest_ip, source_mac, dest_mac)
+
+
+class ARP_Reply(ARP_Object):
+    def __init__(self, source_ip, dest_ip, source_mac, dest_mac):
+        super().__init__(source_ip, dest_ip, source_mac, dest_mac)
+
+================================================================================
+FILE: router.py
+================================================================================
+
+from L3_node import L3_Node
+from other import *
+from interface import Router_Interface
+
+class Router(L3_Node):
+    def __init__(self, name, num_ports):
+        super().__init__(name, num_ports)
+        self._configurable_interface_attributes = ["mac", "ip", "netmask"]
+        self.routes = []
+
+        # Initialize all ports with empty interface attributes and empty connections
+        for i in range(num_ports):
+            interface = Router_Interface(i, self)
+            self.interfaces[interface] = None
+            self.port_map[i] = interface
+
+    @property
+    def configurable_interface_attributes(self):
+            return self._configurable_interface_attributes
+    
+    def assign_all_int_attributes(self, interface_id, *attrs):
+        """Assign all attributes to a router interface."""
+        super().assign_all_int_attributes(interface_id, *attrs)
+        self.add_initial_routes(interface_id)
+
+    def add_initial_routes(self, interface_id):
+        """Add connected/local routes for an interface to the routing table."""
+        interface = self.port_map[interface_id]
+        network_address = self.derive_network_address(interface.ip, interface.netmask)
+        self.routes.append(Route("connected", network_address, interface.netmask, interface))
+        self.routes.append(Route("local", interface.ip, IP("255.255.255.255"), interface))
+
+    def add_static_route(self, dest_network, netmask, next_hop_ip):
+        # Find interface associated with next_hop_ip
+        for self_interface, other_interface in self.interfaces.items():
+            if isinstance(other_interface, Router_Interface) and other_interface.ip == next_hop_ip:
+                interface = self_interface
+                break
+
+        route = Route("static", dest_network, netmask, interface)
+        route.next_hop_ip = next_hop_ip
+        self.routes.append(route)
+
+
+    def receive_packet(self, packet, ingress_interface):
+        payload = packet.payload
+        # If packet was destined for the router interface itself, do nothing (implement later)
+        if packet.dest_ip == ingress_interface.ip:
+            pass
+        else:
+            route = self.longest_prefix_route(packet.dest_ip)
+
+            if route is None:
+                print("No matching route")
+            else:
+                payload = packet.payload
+                egress_interface = route.interface
+                new_packet = Packet(payload, egress_interface.ip, packet.dest_ip)
+
+                if route.type == "static":
+                    if route.next_hop_ip in self.arp_table:
+                        frame = Frame(new_packet, egress_interface.mac, self.arp_table[route.next_hop_ip])
+                        self.tx(frame, egress_interface)
+                    else:
+                        self.tx_buffer.append(new_packet)
+                        arp_request = ARP_Request(egress_interface.ip, route.next_hop_ip, egress_interface.mac, "00:00:00:00:00:00")
+                        frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
+                        self.tx(frame, egress_interface)
+            
+                        if route.next_hop_ip in self.arp_table:
+                            frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[route.next_hop_ip])
+                            self.tx(frame, egress_interface)
+                else:
+                    # Source knows destination MAC
+                    if packet.dest_ip in self.arp_table:
+                        frame = Frame(new_packet, egress_interface.mac, self.arp_table[packet.dest_ip])
+                        self.tx(frame, egress_interface)
+                    # Source does not know destination MAC
+                    else:
+                        self.tx_buffer.append(new_packet)
+                        arp_request = ARP_Request(egress_interface.ip, packet.dest_ip, egress_interface.mac, "00:00:00:00:00:00")
+                        frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
+                        self.tx(frame, egress_interface)
+            
+                        if packet.dest_ip in self.arp_table:
+                            frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[packet.dest_ip])
+                            self.tx(frame, egress_interface)
+
+    def longest_prefix_route(self, target_ip):
+        match = None
+        longest_prefix = 0
+        for route in self.routes:
+            if self.is_same_subnet(route.dest_ip, route.dest_netmask, target_ip):
+                prefix_length = 0
+
+                for octet in route.dest_netmask.octets:
+                    prefix_length += bin(octet).count("1")
+
+                if prefix_length > longest_prefix:
+                    longest_prefix = prefix_length
+                    match = route
+
+        return match
+
+================================================================================
+FILE: switch.py
+================================================================================
+
+from node import Node
+from interface import Access_Interface, Trunk_Interface
+from other import Dot1q_Frame, Frame
+
+class Switch(Node):
+    def __init__(self, name, num_ports):
+        super().__init__(name, num_ports)
+        self.mac_table = {} # {mac : (interface, vlan_id)}
+        self.vlans = set()
+
+        # Initialize all ports with empty interface attributes, no connections, and default vlan configuration
+        for i in range(num_ports):
+            interface = Access_Interface(i, self)
+            self.interfaces[interface] = None
+            self.port_map[i] = interface
+
+    def add_vlan(self, *vlan_ids):
+        self.vlans.add(vlan_ids)
+
+    def dot1q_encapsulate(self, frame: Frame, vid):
+        return Dot1q_Frame(frame.payload, frame.source_mac, frame.dest_mac, vid)
+
+    def dot1q_deencapsulate(self, dot1q_frame):
+        return Frame(dot1q_frame.payload, dot1q_frame.source_mac, dot1q_frame.dest_mac)
+
+    def process_frame_in(self, frame, ingress_interface):
+
+        if isinstance(ingress_interface, Access_Interface):
+            vid = ingress_interface.vlan_id
+        elif isinstance(ingress_interface, Trunk_Interface):
+            if isinstance(frame, Dot1q_Frame):
+                vid = frame.vlan_tag
+                frame = self.dot1q_deencapsulate(frame)
+            elif isinstance(frame, Frame):
+                vid = ingress_interface.native_vlan
+
+        self.mac_table[frame.source_mac] = (ingress_interface, vid)
+
+        if frame.dest_mac in self.mac_table and self.mac_table[frame.dest_mac][1] == vid:
+            self.process_frame_out(frame, self.mac_table[frame.dest_mac][0], vid)
+        else:
+            for self_interface, other_interface in self.interfaces.items():
+                if isinstance(self_interface, Access_Interface):
+                    if self_interface != ingress_interface and self_interface.vlan_id == vid:
+                        self.tx(frame, self_interface)
+
+                if isinstance(self_interface, Trunk_Interface):
+                    if self_interface != ingress_interface and vid in self_interface.allowed_vlans:
+                        self.process_frame_out(frame, self_interface, vid)
+
+    def process_frame_out(self, frame, egress_interface, vid):
+        if isinstance(egress_interface, Access_Interface):
+            self.tx(frame, egress_interface)
+        elif isinstance(egress_interface, Trunk_Interface):
+            if vid == egress_interface.native_vlan:
+                self.tx(frame, egress_interface)
+            else:
+                frame = self.dot1q_encapsulate(frame, vid)
+                self.tx(frame, egress_interface)
+
+    def set_interface_trunk(self, interface_id):
+        old_interface = self.port_map[interface_id]
+        new_interface = Trunk_Interface(interface_id, self)
+
+        # Update switch interface info
+        self.interfaces[new_interface] = self.interfaces.pop(old_interface)
+        self.port_map[interface_id] = new_interface
+
+    def set_allowed_vlans(self, interface_id, *vlan_ids):
+        interface = self.port_map[interface_id]
+        interface.allowed_vlans = set(vlan_ids)
+        interface.allowed_vlans.add(interface.native_vlan)
+
+    def set_native_vlan(self, interface_id, vlan_id):
+        interface = self.port_map[interface_id]
+        interface.native_vlan = vlan_id
+        interface.allowed_vlans.add(vlan_id)
+
+        
+    def flood(self, frame, ingress_interface):
+        if isinstance(ingress_interface, Access_Interface):
+            # Iterate through all connections
+            for self_interface, other_interface in self.interfaces.items():
+                # Transmit frame out of all interfaces with same VLAN ID except the ingress interface it was received on
+                if self_interface.vlan_id == ingress_interface.vlan_id \
+                    and self_interface.id != ingress_interface.id \
+                    and other_interface is not None:
+                    self.tx(frame, self_interface)
+
+================================================================================
+FILE: test_network.py
+================================================================================
+
+from node import Node
+from other import *
+from host import Host
+from router import Router
+from switch import Switch
+import pytest
+
+
+def test_initializes_correct_num_interfaces():
+    node = Host("N1", 8)
+    assert len(node.interfaces) == 8
+
+
+def test_assigns_correct_interface_ids():
+    node = Host("N1", 8)
+    i = 0
+    for interface in node.interfaces:
+        assert interface.id == i
+        i += 1
+
+
+def test_port_map_contains_correct_interfaces():
+    node = Host("N1", 8)
+    for port, interface in node.port_map.items():
+        assert port == interface.id
+
+
+def test_interfaces_start_with_no_connections():
+    node = Host("N1", 8)
+    for self_interface in node.interfaces:
+        assert node.interfaces[self_interface] is None
+
+
+def test_connections_create_twoway_connection():
+    node1 = Host("N1", 8)
+    node2 = Host("N2", 4)
+
+    node1.add_connection(1, node2, 3)
+
+    # Node interfaces connect to correct nodes
+    assert node1.interfaces[node1.port_map[1]].node == node2
+    assert node2.interfaces[node2.port_map[3]].node == node1
+
+    # Node interfaces connect to correct ports
+    assert node1.interfaces[node1.port_map[1]].id == 3
+    assert node2.interfaces[node2.port_map[3]].id == 1
+
+
+def test_host_to_host_communication():
+    PC1 = Host("PC1", 1)
+    PC2 = Host("PC2", 1)
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("10.0.0.2"), IP("255.255.255.0"), IP("192.168.1.254"))
+    PC1.add_connection(0, PC2, 0)
+
+    PC1.send_message("test", 0, IP("10.0.0.2"))
+
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
+
+
+def test_inter_subnet_routing():
+    # LAN 1
+    PC1 = Host("PC3", 1)
+    SW1 = Switch("SW1", 8)
+
+    # LAN 2
+    PC2 = Host("PC2", 1)
+    SW2 = Switch("SW2", 4)
+
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
+
+
+    R1 = Router("R1", 4)
+    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
+    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0"))
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW2, 0)
+
+    SW1.add_connection(1, R1, 0)
+    SW2.add_connection(1, R1, 1)
+
+    PC1.send_message("test", 0, IP("192.168.2.1"))
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
+
+
+def test_static_routing():
+    # LAN 1
+    PC1 = Host("PC3", 1)
+    SW1 = Switch("SW1", 8)
+
+    # LAN 2
+    PC2 = Host("PC2", 1)
+    SW2 = Switch("SW2", 4)
+
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
+
+    R1 = Router("R1", 4)
+    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
+    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("1.1.1.253"), IP("255.255.255.252"))
+
+    R2 = Router("R2", 4)
+    R2.assign_all_int_attributes(0, "xxxx.xxxx.xxxx", IP("192.168.2.254"), IP("255.255.255.0"))
+    R2.assign_all_int_attributes(1, "wwww.wwww.wwww", IP("1.1.1.254"), IP("255.255.255.252"))
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW2, 0)
+
+    SW1.add_connection(1, R1, 0)
+    SW2.add_connection(1, R2, 0)
+
+    R1.add_connection(1, R2, 1)
+
+    R1.add_static_route(IP("192.168.2.0"), IP("255.255.255.0"), IP("1.1.1.254"))
+    R2.add_static_route(IP("192.168.1.0"), IP("255.255.255.0"), IP("1.1.1.253"))
+
+    PC1.send_message("test", 0, IP("192.168.2.1"))
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
+
+
+def test_no_cross_vlan_switching():
+    # VLAN 10
+    PC1 = Host("PC1", 1)
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    # VLAN 20
+    PC2 = Host("PC2", 1)
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    SW1 = Switch("SW1", 8)
+    SW1.add_vlan(10, 20)
+    SW1.port_map[0].vlan_id = 10
+    SW1.port_map[1].vlan_id = 20
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW1, 1)
+
+    PC1.send_message("test", 0, IP("192.168.1.2"))
+    assert not PC2.rx_buffer
+
+
+def test_same_vlan_switching():
+    # VLAN 10
+    PC1 = Host("PC1", 1)
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    # VLAN 20
+    PC2 = Host("PC2", 1)
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    SW1 = Switch("SW1", 8)
+    SW1.add_vlan(10, 20)
+    SW1.port_map[0].vlan_id = 10
+    SW1.port_map[1].vlan_id = 10
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW1, 1)
+
+    PC1.send_message("test", 0, IP("192.168.1.2"))
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
+
+
+def test_broadcast_storm():
+    with pytest.raises(RecursionError):
+        # VLAN 10
+        PC1 = Host("PC3", 1)
+        PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+        # VLAN 20
+        PC2 = Host("PC2", 1)
+        PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
+
+        SW1 = Switch("SW1", 4)
+        SW2 = Switch("SW1", 4)
+        SW3 = Switch("SW1", 4)
+
+        PC1.add_connection(0, SW1, 0)
+        PC2.add_connection(0, SW2, 0)
+
+        SW1.add_connection(1, SW2, 1)
+        SW2.add_connection(2, SW3, 0)
+        SW3.add_connection(1, SW1, 2)
+
+        PC1.send_message("test", 0, IP("192.168.2.1"))
+
+def test_trunkport_switching():
+    # VLAN 10
+    PC1 = Host("PC1", 1)
+    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    PC2 = Host("PC2", 1)
+    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
+
+    # VLAN 20
+    PC3 = Host("PC3", 1)
+    PC3.assign_all_int_attributes(0, "cccc.cccc.cccc", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
+
+    SW1 = Switch("SW1", 8)
+    SW1.add_vlan(10)
+    SW1.set_interface_trunk(1)
+    SW1.set_allowed_vlans(1, 10)
+    SW1.port_map[0].vlan_id = 10
+
+    SW2 = Switch("SW2", 8)
+    SW2.add_vlan(10, 20)
+    SW2.port_map[0].vlan_id = 10
+    SW2.set_interface_trunk(1)
+    SW2.set_allowed_vlans(1, 10)
+    SW2.port_map[2].vlan_id = 20
+
+    PC1.add_connection(0, SW1, 0)
+    PC2.add_connection(0, SW2, 0)
+    PC3.add_connection(0, SW2, 2)
+    SW1.add_connection(1, SW2, 1)
+
+    PC1.send_message("test", 0, IP("192.168.1.2"))
+    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test" and not PC3.rx_buffer
+
