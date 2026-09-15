@@ -1,5 +1,5 @@
-from network_simulator.node import Node
 from network_simulator.interface import Access_Interface, Trunk_Interface
+from network_simulator.node import Node
 from network_simulator.other import Dot1q_Frame, Frame
 
 
@@ -43,20 +43,20 @@ class Switch(Node):
         ):
             self.process_frame_out(frame, self.mac_table[frame.dest_mac][0], vid)
         else:
-            for self_interface, other_interface in self.interfaces.items():
-                if isinstance(self_interface, Access_Interface):
-                    if (
-                        self_interface != ingress_interface
-                        and self_interface.vlan_id == vid
-                    ):
-                        self.tx(frame, self_interface)
+            for self_interface in self.interfaces:
+                if (
+                    isinstance(self_interface, Access_Interface)
+                    and self_interface != ingress_interface
+                    and self_interface.vlan_id == vid
+                ):
+                    self.tx(frame, self_interface)
 
-                if isinstance(self_interface, Trunk_Interface):
-                    if (
-                        self_interface != ingress_interface
-                        and vid in self_interface.allowed_vlans
-                    ):
-                        self.process_frame_out(frame, self_interface, vid)
+                if (
+                    isinstance(self_interface, Trunk_Interface)
+                    and self_interface != ingress_interface
+                    and vid in self_interface.allowed_vlans
+                ):
+                    self.process_frame_out(frame, self_interface, vid)
 
     def process_frame_out(self, frame, egress_interface, vid):
         if isinstance(egress_interface, Access_Interface):

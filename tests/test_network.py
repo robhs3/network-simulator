@@ -1,9 +1,9 @@
-from network_simulator.node import Node
-from network_simulator.other import *
+import pytest
+
 from network_simulator.host import Host
+from network_simulator.other import *
 from network_simulator.router import Router
 from network_simulator.switch import Switch
-import pytest
 
 
 def test_initializes_correct_num_interfaces():
@@ -13,10 +13,8 @@ def test_initializes_correct_num_interfaces():
 
 def test_assigns_correct_interface_ids():
     node = Host("N1", 8)
-    i = 0
-    for interface in node.interfaces:
+    for i, interface in enumerate(node.interfaces):
         assert interface.id == i
-        i += 1
 
 
 def test_port_map_contains_correct_interfaces():

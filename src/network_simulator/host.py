@@ -1,6 +1,6 @@
-from network_simulator.L3_node import L3_Node
-from network_simulator.other import *
 from network_simulator.interface import Host_Interface
+from network_simulator.l3_node import L3_Node
+from network_simulator.other import *
 
 
 class Host(L3_Node):

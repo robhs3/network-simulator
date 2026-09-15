@@ -1,6 +1,5 @@
-from pathlib import Path
 import time
-
+from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent
 OUTPUT_FILE = PROJECT_DIR / "codebase_snapshot.txt"

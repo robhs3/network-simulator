@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 
 from network_simulator.interface import Interface
-from network_simulator.other import Frame, IP, Packet
+from network_simulator.other import Frame, Packet
 
 
 class Node(ABC):
@@ -22,7 +22,7 @@ class Node(ABC):
         self.tx_buffer: list[Packet | Frame] = []
 
     def add_connection(
-        self, self_interface_id: int, other_node: "Node", other_interface_id: int
+        self, self_interface_id: int, other_node: Node, other_interface_id: int
     ) -> None:
         """Connect the interface of one node to the interface of another node."""
         # Connections are formed bidirectionally, so either node can initiate a complete connection

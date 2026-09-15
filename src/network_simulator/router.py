@@ -1,6 +1,6 @@
-from network_simulator.L3_node import L3_Node
-from network_simulator.other import *
 from network_simulator.interface import Router_Interface
+from network_simulator.l3_node import L3_Node
+from network_simulator.other import *
 
 
 class Router(L3_Node):
@@ -131,7 +131,7 @@ class Router(L3_Node):
                 prefix_length = 0
 
                 for octet in route.dest_netmask.octets:
-                    prefix_length += bin(octet).count("1")
+                    prefix_length += (octet).bit_count()
 
                 if prefix_length > longest_prefix:
                     longest_prefix = prefix_length
