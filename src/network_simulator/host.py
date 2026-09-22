@@ -4,6 +4,8 @@ from network_simulator.other import *
 
 
 class Host(L3_Node):
+    """Represents a host device in a network."""
+
     def __init__(self, name, num_ports):
         super().__init__(name, num_ports)
         self._configurable_interface_attributes = ["mac", "ip", "netmask", "gateway"]

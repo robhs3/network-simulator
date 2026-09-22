@@ -14,8 +14,8 @@ class Interface:
         return f"{self.node.name} {self.id}"
 
 
-class Router_Interface(Interface):
-    """Represents an interface that appears on a router."""
+class L3_Interface(Interface):
+    """Represents an interface that appears on a layer node."""
 
     def __init__(self, id, node):
         super().__init__(id, node)
@@ -23,7 +23,11 @@ class Router_Interface(Interface):
         self.netmask = None
 
 
-class Host_Interface(Router_Interface):
+class Router_Interface(L3_Interface):
+    """Represents an interface that appears on a router."""
+
+
+class Host_Interface(L3_Interface):
     """Represents an interface that appears on a host."""
 
     def __init__(self, id, node):

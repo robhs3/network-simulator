@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from network_simulator.interface import Interface
+from network_simulator.interface import Interface, L3_Interface
 from network_simulator.node import Node
 from network_simulator.other import IP, ARP_Reply, ARP_Request, Frame, Packet
 
@@ -35,6 +35,8 @@ class L3_Node(Node, ABC):
 
     def process_frame_in(self, frame: Frame, ingress_interface: Interface) -> None:
         """Begin processing the received frame based on its payload."""
+        assert isinstance(ingress_interface, L3_Interface)
+
         if (
             frame.dest_mac == ingress_interface.mac
             or frame.dest_mac == "ff:ff:ff:ff:ff:ff"
@@ -55,7 +57,7 @@ class L3_Node(Node, ABC):
         self.arp_table[arp_reply.source_ip] = arp_reply.source_mac
 
     def receive_arp_request(
-        self, arp_request: ARP_Request, ingress_interface: Interface
+        self, arp_request: ARP_Request, ingress_interface: L3_Interface
     ):
         """Process a received ARP Request message."""
         self.rx_buffer[ingress_interface].pop()
