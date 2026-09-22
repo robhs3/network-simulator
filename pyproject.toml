@@ -5,7 +5,9 @@ authors = [
     { name = "Rob Samson", email = "rhsamson22@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pyqt6>=6.11.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

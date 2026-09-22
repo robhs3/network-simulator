@@ -1,9 +1,7 @@
 import sys
 
 from PyQt6.QtCore import QLineF, Qt, pyqtSignal
-
 from PyQt6.QtGui import QAction, QBrush, QColor, QKeySequence, QPen, QShortcut
-
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -26,6 +24,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
 
 class CableItem(QGraphicsLineItem):
     def __init__(self, node1, node2):
@@ -74,7 +73,7 @@ class NetworkNodeItem(QGraphicsRectItem):
 
         self.label.setPos(
             (node_rect.width() - label_rect.width()) / 2,
-            (node_rect.height() - label_rect.height()) / 2
+            (node_rect.height() - label_rect.height()) / 2,
         )
 
     def itemChange(self, change, value):
@@ -93,7 +92,7 @@ class NetworkNodeItem(QGraphicsRectItem):
 
         self.label.setPos(
             (node_rect.width() - label_rect.width()) / 2,
-            (node_rect.height() - label_rect.height()) / 2
+            (node_rect.height() - label_rect.height()) / 2,
         )
 
 
@@ -101,7 +100,6 @@ class NetworkScene(QGraphicsScene):
     empty_space_clicked = pyqtSignal(float, float)
     node_deleted = pyqtSignal(object)
     node_clicked = pyqtSignal(object)
-    
 
     def mousePressEvent(self, event):
         position = event.scenePos()
@@ -129,15 +127,14 @@ class NetworkScene(QGraphicsScene):
 
             self.removeItem(item)
 
+
 class NetworkView(QGraphicsView):
     def __init__(self, scene):
         super().__init__(scene)
 
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
 
-        self.setTransformationAnchor(
-            QGraphicsView.ViewportAnchor.AnchorUnderMouse
-        )
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
         self._panning = False
         self._pan_start = None
@@ -182,6 +179,7 @@ class NetworkView(QGraphicsView):
             return
 
         super().mouseReleaseEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -347,10 +345,7 @@ class MainWindow(QMainWindow):
     def add_node(self, node_type, x, y):
         node = NetworkNodeItem(node_type, node_type)
         node_rect = node.rect()
-        node.setPos(
-            x - node_rect.width() / 2,
-            y - node_rect.height() / 2
-        )
+        node.setPos(x - node_rect.width() / 2, y - node_rect.height() / 2)
         self.scene.addItem(node)
         self.nodes.append(node)
 
@@ -441,6 +436,7 @@ class MainWindow(QMainWindow):
         selected_node.set_name(new_name)
 
         self.selection_label.setText(f"Selected node: {new_name}")
+
 
 app = QApplication(sys.argv)
 
