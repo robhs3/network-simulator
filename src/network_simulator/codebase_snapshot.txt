@@ -1,133 +1,472 @@
 ================================================================================
+FILE: __init__.py
+================================================================================
+
+
+
+================================================================================
 FILE: gui.py
 ================================================================================
 
-import tkinter as tk
+import sys
 
-root = tk.Tk()
+from PyQt6.QtCore import QLineF, Qt, pyqtSignal
 
-root.title("Network Simulator")
-root.geometry("1000x700")
+from PyQt6.QtGui import QAction, QBrush, QColor, QKeySequence, QPen, QShortcut
 
-selected_tool = None
-node_count = 0
-
-sidebar = tk.Frame(root, width=150, bg="darkgray")
-sidebar.pack(side="left", fill="y")
-sidebar.pack_propagate(False)
-
-canvas = tk.Canvas(root, bg="black")
-canvas.pack(side="right", fill="both", expand=True)
-
-def node_clicked(event):
-    item = canvas.find_withtag("current")
-
-    tags = canvas.gettags(item)
-
-    print(tags)
-
-def canvas_clicked(event):
-    global selected_tool
-    global node_count
-
-    if selected_tool is None:
-        return
-
-    node_count += 1
-    node_tag = f"node_{node_count}"
-
-    if selected_tool == "host":
-        canvas.create_rectangle(
-            event.x - 30,
-            event.y - 20,
-            event.x + 30,
-            event.y + 20,
-            fill="lightblue",
-            tags=("node", node_tag)
-        )
-
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Host",
-            tags=("node", node_tag)            
-        )
-
-    elif selected_tool == "switch":
-        canvas.create_rectangle(
-            event.x - 30,
-            event.y - 20,
-            event.x + 30,
-            event.y + 20,
-            fill="lightblue",
-            tags=("node", node_tag)
-        )
-
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Switch",
-            tags=("node", node_tag)
-        )
-
-    elif selected_tool == "router":
-        canvas.create_rectangle(
-            event.x - 30,
-            event.y - 20,
-            event.x + 30,
-            event.y + 20,
-            fill="lightblue",
-            tags=("node", node_tag)
-        )
-
-        canvas.create_text(
-            event.x,
-            event.y,
-            text="Router",
-            tags=("node", node_tag)
-        )
-
-    selected_tool = None
-
-canvas.bind("<Button-1>", canvas_clicked)
-canvas.tag_bind("node", "<Button-1>", node_clicked)
-
-def select_tool(tool):
-    global selected_tool
-    selected_tool = tool
-    print(tool, " placement mode")
-
-host_button = tk.Button(
-    sidebar, 
-    text="Host",
-    command=lambda: select_tool("host")
-)
-switch_button = tk.Button(
-    sidebar, 
-    text="Switch",
-    command=lambda: select_tool("switch")
+from PyQt6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QFormLayout,
+    QFrame,
+    QGraphicsItem,
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsTextItem,
+    QGraphicsView,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QSplitter,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 
-router_button = tk.Button(
-    sidebar, 
-    text="Router",
-    command=lambda: select_tool("router")
-)
+class CableItem(QGraphicsLineItem):
+    def __init__(self, node1, node2):
+        super().__init__()
 
-host_button.pack(fill="x", padx=10, pady=10)
-switch_button.pack(fill="x", padx=10, pady=10)
-router_button.pack(fill="x", padx=10, pady=10)
+        self.setZValue(-1)
+
+        self.node1 = node1
+        self.node2 = node2
+
+        node1.cables.append(self)
+        node2.cables.append(self)
+
+        self.update_position()
+
+    def update_position(self):
+        point1 = self.node1.mapToScene(self.node1.rect().center())
+        point2 = self.node2.mapToScene(self.node2.rect().center())
+
+        self.setLine(QLineF(point1, point2))
+
+    def disconnect(self):
+        self.node1.cables.remove(self)
+        self.node2.cables.remove(self)
 
 
-root.mainloop()
+class NetworkNodeItem(QGraphicsRectItem):
+    def __init__(self, node_type, name):
+        super().__init__(0, 0, 100, 60)
+
+        self.node_type = node_type
+        self.name = name
+        self.cables = []
+
+        self.setBrush(QBrush(QColor("grey")))
+        self.setPen(QPen(QColor("black"), 2))
+
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+
+        self.label = QGraphicsTextItem(name, self)
+
+        label_rect = self.label.boundingRect()
+        node_rect = self.rect()
+
+        self.label.setPos(
+            (node_rect.width() - label_rect.width()) / 2,
+            (node_rect.height() - label_rect.height()) / 2
+        )
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            for cable in self.cables:
+                cable.update_position()
+
+        return super().itemChange(change, value)
+
+    def set_name(self, name):
+        self.name = name
+        self.label.setPlainText(name)
+
+        label_rect = self.label.boundingRect()
+        node_rect = self.rect()
+
+        self.label.setPos(
+            (node_rect.width() - label_rect.width()) / 2,
+            (node_rect.height() - label_rect.height()) / 2
+        )
+
+
+class NetworkScene(QGraphicsScene):
+    empty_space_clicked = pyqtSignal(float, float)
+    node_deleted = pyqtSignal(object)
+    node_clicked = pyqtSignal(object)
+    
+
+    def mousePressEvent(self, event):
+        position = event.scenePos()
+
+        item = self.itemAt(position, self.views()[0].transform())
+
+        if item is None:
+            self.empty_space_clicked.emit(position.x(), position.y())
+
+        elif isinstance(item, NetworkNodeItem):
+            self.node_clicked.emit(item)
+
+        elif isinstance(item.parentItem(), NetworkNodeItem):
+            self.node_clicked.emit(item.parentItem())
+
+        super().mousePressEvent(event)
+
+    def delete_selected_items(self):
+        for item in self.selectedItems():
+            if isinstance(item, NetworkNodeItem):
+                for cable in item.cables.copy():
+                    cable.disconnect()
+                    self.removeItem(cable)
+                self.node_deleted.emit(item)
+
+            self.removeItem(item)
+
+class NetworkView(QGraphicsView):
+    def __init__(self, scene):
+        super().__init__(scene)
+
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+
+        self.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+        )
+
+        self._panning = False
+        self._pan_start = None
+
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            zoom_factor = 1.15
+        else:
+            zoom_factor = 1 / 1.15
+
+        self.scale(zoom_factor, zoom_factor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_start = event.position()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning:
+            delta = event.position() - self._pan_start
+            self._pan_start = event.position()
+
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - int(delta.x())
+            )
+
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - int(delta.y())
+            )
+
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = False
+            self._pan_start = None
+            return
+
+        super().mouseReleaseEvent(event)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.selected_tool = None
+
+        self.connection_mode = False
+        self.connection_start = None
+
+        escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        escape_shortcut.activated.connect(self.cancel_action)
+
+        self.nodes = []
+
+        self.setWindowTitle("Network Simulator")
+        self.resize(1000, 700)
+
+        layout = QHBoxLayout()
+
+        self.label = QLabel("Nothing selected")
+
+        self.selection_label = QLabel("No node selected")
+
+        host_button = QPushButton("Host")
+        switch_button = QPushButton("Switch")
+        connect_button = QPushButton("Connect")
+
+        host_button.setCheckable(True)
+        switch_button.setCheckable(True)
+
+        self.tool_button_group = QButtonGroup(self)
+
+        self.tool_button_group.addButton(host_button)
+        self.tool_button_group.addButton(switch_button)
+
+        self.tool_button_group.setExclusive(True)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Node name")
+        self.name_input.setEnabled(False)
+        self.name_input.editingFinished.connect(self.name_edit_finished)
+
+        self.type_label = QLineEdit("-")
+
+        sidebar = QWidget()
+        sidebar.setMinimumWidth(150)
+        sidebar_layout = QVBoxLayout()
+
+        tools_group = QGroupBox("Tools")
+        tools_layout = QVBoxLayout()
+
+        tools_layout.addWidget(host_button)
+        tools_layout.addWidget(switch_button)
+        tools_layout.addWidget(connect_button)
+
+        tools_group.setLayout(tools_layout)
+
+        properties_group = QGroupBox("Properties")
+        properties_layout = QFormLayout()
+
+        properties_layout.addRow("Type:", self.type_label)
+        properties_layout.addRow("Name:", self.name_input)
+
+        properties_group.setLayout(properties_layout)
+
+        sidebar_layout.addWidget(self.label)
+        sidebar_layout.addWidget(tools_group)
+        sidebar_layout.addWidget(self.selection_label)
+        sidebar_layout.addWidget(properties_group)
+        sidebar_layout.addStretch()
+
+        sidebar.setLayout(sidebar_layout)
+
+        workspace = QFrame()
+        workspace.setFrameShape(QFrame.Shape.Box)
+        workspace_layout = QVBoxLayout()
+
+        self.scene = NetworkScene()
+        self.scene.setSceneRect(-1000, -600, 2000, 1200)
+
+        self.scene.empty_space_clicked.connect(self.place_selected_tool)
+        self.scene.selectionChanged.connect(self.selection_changed)
+        self.scene.node_deleted.connect(self.node_deleted)
+        self.scene.node_clicked.connect(self.node_clicked)
+
+        view = NetworkView(self.scene)
+        workspace_layout.addWidget(view)
+
+        workspace.setLayout(workspace_layout)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        splitter.addWidget(sidebar)
+        splitter.addWidget(workspace)
+
+        splitter.setCollapsible(0, False)
+
+        splitter.setSizes([180, 820])
+
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(splitter)
+
+        host_button.clicked.connect(lambda: self.select_tool("Host"))
+        switch_button.clicked.connect(lambda: self.select_tool("Switch"))
+        connect_button.clicked.connect(self.start_connection)
+
+        central_widget = QWidget()
+        central_widget.setLayout(layout)
+
+        self.setCentralWidget(central_widget)
+
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+
+        self.delete_action = QAction("Delete", self)
+        self.delete_action.setShortcut(QKeySequence(Qt.Key.Key_Delete))
+        self.delete_action.setEnabled(False)
+        self.delete_action.triggered.connect(self.scene.delete_selected_items)
+
+        file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction(exit_action)
+
+        edit_menu = self.menuBar().addMenu("Edit")
+        edit_menu.addAction(self.delete_action)
+
+        toolbar = QToolBar("Main Toolbar")
+        self.addToolBar(toolbar)
+
+        toolbar.addAction(self.delete_action)
+        toolbar.addSeparator()
+        toolbar.addAction(exit_action)
+
+        self.statusBar().showMessage("Ready")
+
+    def select_tool(self, tool):
+        self.selected_tool = tool
+        self.label.setText(f"Selected: {self.selected_tool}")
+
+        self.statusBar().showMessage(f"Click the workspace to place a {tool}")
+
+    def place_selected_tool(self, x, y):
+        if self.selected_tool is None:
+            return
+
+        self.add_node(self.selected_tool, x, y)
+
+        self.selected_tool = None
+        self.label.setText("Nothing selected")
+
+        self.tool_button_group.setExclusive(False)
+
+        for button in self.tool_button_group.buttons():
+            button.setChecked(False)
+
+        self.tool_button_group.setExclusive(True)
+
+        self.statusBar().showMessage("Ready")
+
+    def add_node(self, node_type, x, y):
+        node = NetworkNodeItem(node_type, node_type)
+        node_rect = node.rect()
+        node.setPos(
+            x - node_rect.width() / 2,
+            y - node_rect.height() / 2
+        )
+        self.scene.addItem(node)
+        self.nodes.append(node)
+
+    def selection_changed(self):
+        selected_items = self.scene.selectedItems()
+
+        self.delete_action.setEnabled(len(selected_items) > 0)
+
+        if len(selected_items) == 1:
+            selected_node = selected_items[0]
+
+            self.selection_label.setText(f"Selected node: {selected_node.name}")
+
+            self.type_label.setText(selected_node.node_type)
+
+            self.name_input.setText(selected_node.name)
+
+            self.name_input.setEnabled(True)
+
+        elif len(selected_items) > 1:
+            self.selection_label.setText(f"{len(selected_items)} nodes selected")
+
+            self.type_label.setText("-")
+            self.name_input.clear()
+            self.name_input.setEnabled(False)
+
+        else:
+            self.selection_label.setText("No node selected")
+
+            self.type_label.setText("-")
+            self.name_input.clear()
+            self.name_input.setEnabled(False)
+
+    def node_deleted(self, node):
+        self.nodes.remove(node)
+
+    def node_clicked(self, node):
+        if not self.connection_mode:
+            return
+
+        if self.connection_start is None:
+            self.connection_start = node
+            self.label.setText(f"Connect from: {node.name}")
+            return
+
+        if node is self.connection_start:
+            return
+
+        cable = CableItem(self.connection_start, node)
+        self.scene.addItem(cable)
+
+        self.connection_mode = False
+        self.connection_start = None
+        self.label.setText("Nothing selected")
+
+    def start_connection(self):
+        self.connection_mode = True
+        self.connection_start = None
+        self.selected_tool = None
+        self.label.setText("Connection mode")
+
+    def cancel_action(self):
+        self.selected_tool = None
+        self.connection_mode = False
+        self.connection_start = None
+
+        self.label.setText("Nothing selected")
+
+        self.tool_button_group.setExclusive(False)
+
+        for button in self.tool_button_group.buttons():
+            button.setChecked(False)
+
+        self.tool_button_group.setExclusive(True)
+
+        self.statusBar().showMessage("Ready")
+
+    def name_edit_finished(self):
+        selected_items = self.scene.selectedItems()
+
+        if len(selected_items) != 1:
+            return
+
+        selected_node = selected_items[0]
+
+        new_name = self.name_input.text()
+
+        selected_node.set_name(new_name)
+
+        self.selection_label.setText(f"Selected node: {new_name}")
+
+app = QApplication(sys.argv)
+
+window = MainWindow()
+window.show()
+
+app.exec()
 
 ================================================================================
 FILE: host.py
 ================================================================================
 
-from L3_node import L3_Node
-from other import *
-from interface import Host_Interface
+from network_simulator.interface import Host_Interface
+from network_simulator.l3_node import L3_Node
+from network_simulator.other import *
+
 
 class Host(L3_Node):
     def __init__(self, name, num_ports):
@@ -142,7 +481,7 @@ class Host(L3_Node):
 
     @property
     def configurable_interface_attributes(self):
-         return self._configurable_interface_attributes
+        return self._configurable_interface_attributes
 
     # Send a raw message that is processed down the OSI stack. Tests for end-to-end communication
     def send_message(self, payload, egress_interface_id, dest_ip):
@@ -152,7 +491,10 @@ class Host(L3_Node):
         packet = Packet(payload, egress_interface.ip, dest_ip)
 
         # Case 1: Source and destination node on same subnet
-        if self.is_same_subnet(egress_interface.ip, egress_interface.netmask, dest_ip) == True:
+        if (
+            self.is_same_subnet(egress_interface.ip, egress_interface.netmask, dest_ip)
+            == True
+        ):
             next_hop_ip = dest_ip
         # Case 2: Source and destination node on different subnets
         else:
@@ -161,22 +503,31 @@ class Host(L3_Node):
         # Case 1: Source knows destination MAC.
         if next_hop_ip in self.arp_table:
             # Encapsulate and transmit
-                frame = Frame(packet, egress_interface.mac, self.arp_table[next_hop_ip])
-                self.tx(frame, egress_interface)
+            frame = Frame(packet, egress_interface.mac, self.arp_table[next_hop_ip])
+            self.tx(frame, egress_interface)
         # Case 2: Source does not know destination MAC
         else:
             # ARP discovery, then encapsulate and transmit
             self.tx_buffer.append(packet)
-            arp_request = ARP_Request(egress_interface.ip, next_hop_ip, egress_interface.mac, "00:00:00:00:00:00")
+            arp_request = ARP_Request(
+                egress_interface.ip,
+                next_hop_ip,
+                egress_interface.mac,
+                "00:00:00:00:00:00",
+            )
             frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
             self.tx(frame, egress_interface)
 
             if next_hop_ip in self.arp_table:
-                frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[next_hop_ip])
+                frame = Frame(
+                    self.tx_buffer.pop(),
+                    egress_interface.mac,
+                    self.arp_table[next_hop_ip],
+                )
                 self.tx(frame, egress_interface)
-        
+
     def receive_packet(self, payload, ingress_interface):
-            pass
+        pass
 
 ================================================================================
 FILE: interface.py
@@ -190,9 +541,9 @@ class Interface:
         self.id = id
         self.node = node
         self.mac = None
-    
+
     def __str__(self):
-        return(f"\tMAC: {self.mac}")
+        return f"\tMAC: {self.mac}"
 
     def __repr__(self):
         return f"{self.node.name} {self.id}"
@@ -209,17 +560,21 @@ class Router_Interface(Interface):
 
 class Host_Interface(Router_Interface):
     """Represents an interface that appears on a host."""
+
     def __init__(self, id, node):
         super().__init__(id, node)
         self.gateway = None
+
 
 class Switchport(Interface):
     def __init__(self, id, node):
         super().__init__(id, node)
         self.vlan_ids = set(1)
 
+
 class Access_Interface(Interface):
     """Represents an access interface on a switch."""
+
     def __init__(self, id, node):
         super().__init__(id, node)
         self.vlan_id = 1
@@ -227,23 +582,21 @@ class Access_Interface(Interface):
 
 class Trunk_Interface(Interface):
     """Represents a trunk interface on a switch."""
+
     def __init__(self, id, node):
         super().__init__(id, node)
         self.native_vlan = 1
         self.allowed_vlans = set(range(1, 4095))
 
-
-    
-
 ================================================================================
-FILE: L3_node.py
+FILE: l3_node.py
 ================================================================================
 
 from abc import ABC, abstractmethod
 
-from interface import Interface
-from node import Node
-from other import ARP_Reply, ARP_Request, Frame, IP, Packet
+from network_simulator.interface import Interface
+from network_simulator.node import Node
+from network_simulator.other import IP, ARP_Reply, ARP_Request, Frame, Packet
 
 
 class L3_Node(Node, ABC):
@@ -261,15 +614,25 @@ class L3_Node(Node, ABC):
 
     def is_same_subnet(self, source_ip: IP, netmask: IP, dest_ip: IP) -> bool:
         """Return True if two IP addresses are on the same subnet, given a netmask."""
-        return self.derive_network_address(source_ip, netmask) == self.derive_network_address(dest_ip, netmask)
-    
+        return self.derive_network_address(
+            source_ip, netmask
+        ) == self.derive_network_address(dest_ip, netmask)
+
     def derive_network_address(self, ip: IP, netmask: IP) -> IP:
         """Return the network address of an IP address's subnet, given its netmask."""
-        return IP(".".join(str(ip_octet & netmask_octet) for ip_octet, netmask_octet in zip(ip.octets, netmask.octets)))
+        return IP(
+            ".".join(
+                str(ip_octet & netmask_octet)
+                for ip_octet, netmask_octet in zip(ip.octets, netmask.octets)
+            )
+        )
 
     def process_frame_in(self, frame: Frame, ingress_interface: Interface) -> None:
         """Begin processing the received frame based on its payload."""
-        if frame.dest_mac == ingress_interface.mac or frame.dest_mac == "ff:ff:ff:ff:ff:ff":
+        if (
+            frame.dest_mac == ingress_interface.mac
+            or frame.dest_mac == "ff:ff:ff:ff:ff:ff"
+        ):
             payload = frame.payload
 
             match payload:
@@ -285,13 +648,20 @@ class L3_Node(Node, ABC):
         self.rx_buffer[ingress_interface].pop()
         self.arp_table[arp_reply.source_ip] = arp_reply.source_mac
 
-    def receive_arp_request(self, arp_request: ARP_Request, ingress_interface: Interface):
+    def receive_arp_request(
+        self, arp_request: ARP_Request, ingress_interface: Interface
+    ):
         """Process a received ARP Request message."""
         self.rx_buffer[ingress_interface].pop()
 
         if arp_request.dest_ip == ingress_interface.ip:
             self.arp_table[arp_request.source_ip] = arp_request.source_mac
-            arp_reply = ARP_Reply(ingress_interface.ip, arp_request.source_ip, ingress_interface.mac, arp_request.source_mac)
+            arp_reply = ARP_Reply(
+                ingress_interface.ip,
+                arp_request.source_ip,
+                ingress_interface.mac,
+                arp_request.source_mac,
+            )
             frame = Frame(arp_reply, ingress_interface.mac, arp_request.source_mac)
             self.tx(frame, ingress_interface)
 
@@ -303,7 +673,9 @@ class L3_Node(Node, ABC):
     def assign_all_int_attributes(self, interface_id, *attrs):
         """Assign all attributes to an interface according to the layer 3 node type."""
         interface = self.port_map[interface_id]
-        for attribute_type, attribute_value in zip(self.configurable_interface_attributes, attrs):
+        for attribute_type, attribute_value in zip(
+            self.configurable_interface_attributes, attrs
+        ):
             setattr(interface, attribute_type, attribute_value)
 
     def __str__(self):
@@ -311,7 +683,7 @@ class L3_Node(Node, ABC):
 
         for self_interface, other_interface in self.interfaces.items():
             connection_string += f"\n\tPort {self_interface.id} -> {other_interface.node.name if other_interface is not None else None}\t\n{self_interface}\n"
-        
+
         return (
             f"Name: {self.name}\n"
             f"Interfaces: {connection_string}"
@@ -319,17 +691,16 @@ class L3_Node(Node, ABC):
         )
 
     def __repr__(self):
-        return(f"{self.name}")
+        return f"{self.name}"
 
 ================================================================================
 FILE: main.py
 ================================================================================
 
-from host import Host
-from switch import Switch
-from router import Router
-from other import IP
-from node import Node
+from network_simulator.host import Host
+from network_simulator.other import IP
+from network_simulator.router import Router
+from network_simulator.switch import Switch
 
 if __name__ == "__main__":
     # LAN 1
@@ -340,13 +711,20 @@ if __name__ == "__main__":
     PC2 = Host("PC2", 1)
     SW2 = Switch("SW2", 4)
 
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("10.0.1.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
+    PC1.assign_all_int_attributes(
+        0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254")
+    )
+    PC2.assign_all_int_attributes(
+        0, "bbbb.bbbb.bbbb", IP("10.0.1.1"), IP("255.255.255.0"), IP("192.168.2.254")
+    )
 
     R1 = Router("R1", 4)
-    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
-    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0"))
+    R1.assign_all_int_attributes(
+        0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0")
+    )
+    R1.assign_all_int_attributes(
+        1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0")
+    )
 
     PC1.add_connection(0, SW1, 0)
     PC2.add_connection(0, SW2, 0)
@@ -364,8 +742,8 @@ FILE: node.py
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-from interface import Interface
-from other import Frame, IP, Packet
+from network_simulator.interface import Interface
+from network_simulator.other import Frame, Packet
 
 
 class Node(ABC):
@@ -378,23 +756,20 @@ class Node(ABC):
         # Stores received frames before processing.
         self.rx_buffer: defaultdict[Interface, list[Frame]] = defaultdict(list)
 
-        self.interfaces: dict[Interface, Interface | None] = {}  
+        self.interfaces: dict[Interface, Interface | None] = {}
         self.port_map: dict[int, Interface] = {}
 
         # Stores outbound packets/frames before transmission.
-        self.tx_buffer: list[Packet | Frame] = []  
+        self.tx_buffer: list[Packet | Frame] = []
 
     def add_connection(
-            self, 
-            self_interface_id: int, 
-            other_node: "Node",
-            other_interface_id: int
-            ) -> None:
+        self, self_interface_id: int, other_node: Node, other_interface_id: int
+    ) -> None:
         """Connect the interface of one node to the interface of another node."""
         # Connections are formed bidirectionally, so either node can initiate a complete connection
         self_interface = self.port_map[self_interface_id]
         other_interface = other_node.port_map[other_interface_id]
-        
+
         self.interfaces[self_interface] = other_interface
         other_node.interfaces[other_interface] = self_interface
 
@@ -421,8 +796,7 @@ class Node(ABC):
         for self_interface, other_interface in self.interfaces.items():
             other_node_name = other_interface.node.name if other_interface else None
             connections.append(
-                f"Port {self_interface.id} -> {other_node_name}\n"
-                f"{self_interface}"
+                f"Port {self_interface.id} -> {other_node_name}\n{self_interface}"
             )
 
         return "\n".join(connections)
@@ -443,9 +817,8 @@ class Route:
         self.next_hop_ip = None
 
     def __str__(self):
-        return (
-            f"Type: {self.type}, Destination: {self.dest_ip}, Netmask: {self.dest_netmask}, Interface: {self.interface.id}"
-        )
+        return f"Type: {self.type}, Destination: {self.dest_ip}, Netmask: {self.dest_netmask}, Interface: {self.interface.id}"
+
 
 class IP:
     def __init__(self, ip_string):
@@ -506,6 +879,7 @@ class Frame(PDU):
             f"Destination Mac: {self.dest_mac}"
         )
 
+
 class Dot1q_Frame(Frame):
     def __init__(self, payload, source_mac, dest_mac, vlan_tag):
         super().__init__(payload, source_mac, dest_mac)
@@ -518,7 +892,7 @@ class ARP_Object:
         self.dest_ip = dest_ip
         self.source_mac = source_mac
         self.dest_mac = dest_mac
-    
+
 
 class ARP_Request(ARP_Object):
     def __init__(self, source_ip, dest_ip, source_mac, dest_mac):
@@ -533,9 +907,10 @@ class ARP_Reply(ARP_Object):
 FILE: router.py
 ================================================================================
 
-from L3_node import L3_Node
-from other import *
-from interface import Router_Interface
+from network_simulator.interface import Router_Interface
+from network_simulator.l3_node import L3_Node
+from network_simulator.other import *
+
 
 class Router(L3_Node):
     def __init__(self, name, num_ports):
@@ -551,8 +926,8 @@ class Router(L3_Node):
 
     @property
     def configurable_interface_attributes(self):
-            return self._configurable_interface_attributes
-    
+        return self._configurable_interface_attributes
+
     def assign_all_int_attributes(self, interface_id, *attrs):
         """Assign all attributes to a router interface."""
         super().assign_all_int_attributes(interface_id, *attrs)
@@ -562,20 +937,26 @@ class Router(L3_Node):
         """Add connected/local routes for an interface to the routing table."""
         interface = self.port_map[interface_id]
         network_address = self.derive_network_address(interface.ip, interface.netmask)
-        self.routes.append(Route("connected", network_address, interface.netmask, interface))
-        self.routes.append(Route("local", interface.ip, IP("255.255.255.255"), interface))
+        self.routes.append(
+            Route("connected", network_address, interface.netmask, interface)
+        )
+        self.routes.append(
+            Route("local", interface.ip, IP("255.255.255.255"), interface)
+        )
 
     def add_static_route(self, dest_network, netmask, next_hop_ip):
         # Find interface associated with next_hop_ip
         for self_interface, other_interface in self.interfaces.items():
-            if isinstance(other_interface, Router_Interface) and other_interface.ip == next_hop_ip:
+            if (
+                isinstance(other_interface, Router_Interface)
+                and other_interface.ip == next_hop_ip
+            ):
                 interface = self_interface
                 break
 
         route = Route("static", dest_network, netmask, interface)
         route.next_hop_ip = next_hop_ip
         self.routes.append(route)
-
 
     def receive_packet(self, packet, ingress_interface):
         payload = packet.payload
@@ -594,31 +975,61 @@ class Router(L3_Node):
 
                 if route.type == "static":
                     if route.next_hop_ip in self.arp_table:
-                        frame = Frame(new_packet, egress_interface.mac, self.arp_table[route.next_hop_ip])
+                        frame = Frame(
+                            new_packet,
+                            egress_interface.mac,
+                            self.arp_table[route.next_hop_ip],
+                        )
                         self.tx(frame, egress_interface)
                     else:
                         self.tx_buffer.append(new_packet)
-                        arp_request = ARP_Request(egress_interface.ip, route.next_hop_ip, egress_interface.mac, "00:00:00:00:00:00")
-                        frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
+                        arp_request = ARP_Request(
+                            egress_interface.ip,
+                            route.next_hop_ip,
+                            egress_interface.mac,
+                            "00:00:00:00:00:00",
+                        )
+                        frame = Frame(
+                            arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff"
+                        )
                         self.tx(frame, egress_interface)
-            
+
                         if route.next_hop_ip in self.arp_table:
-                            frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[route.next_hop_ip])
+                            frame = Frame(
+                                self.tx_buffer.pop(),
+                                egress_interface.mac,
+                                self.arp_table[route.next_hop_ip],
+                            )
                             self.tx(frame, egress_interface)
                 else:
                     # Source knows destination MAC
                     if packet.dest_ip in self.arp_table:
-                        frame = Frame(new_packet, egress_interface.mac, self.arp_table[packet.dest_ip])
+                        frame = Frame(
+                            new_packet,
+                            egress_interface.mac,
+                            self.arp_table[packet.dest_ip],
+                        )
                         self.tx(frame, egress_interface)
                     # Source does not know destination MAC
                     else:
                         self.tx_buffer.append(new_packet)
-                        arp_request = ARP_Request(egress_interface.ip, packet.dest_ip, egress_interface.mac, "00:00:00:00:00:00")
-                        frame = Frame(arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff")
+                        arp_request = ARP_Request(
+                            egress_interface.ip,
+                            packet.dest_ip,
+                            egress_interface.mac,
+                            "00:00:00:00:00:00",
+                        )
+                        frame = Frame(
+                            arp_request, egress_interface.mac, "ff:ff:ff:ff:ff:ff"
+                        )
                         self.tx(frame, egress_interface)
-            
+
                         if packet.dest_ip in self.arp_table:
-                            frame = Frame(self.tx_buffer.pop(), egress_interface.mac, self.arp_table[packet.dest_ip])
+                            frame = Frame(
+                                self.tx_buffer.pop(),
+                                egress_interface.mac,
+                                self.arp_table[packet.dest_ip],
+                            )
                             self.tx(frame, egress_interface)
 
     def longest_prefix_route(self, target_ip):
@@ -629,7 +1040,7 @@ class Router(L3_Node):
                 prefix_length = 0
 
                 for octet in route.dest_netmask.octets:
-                    prefix_length += bin(octet).count("1")
+                    prefix_length += (octet).bit_count()
 
                 if prefix_length > longest_prefix:
                     longest_prefix = prefix_length
@@ -641,14 +1052,15 @@ class Router(L3_Node):
 FILE: switch.py
 ================================================================================
 
-from node import Node
-from interface import Access_Interface, Trunk_Interface
-from other import Dot1q_Frame, Frame
+from network_simulator.interface import Access_Interface, Trunk_Interface
+from network_simulator.node import Node
+from network_simulator.other import Dot1q_Frame, Frame
+
 
 class Switch(Node):
     def __init__(self, name, num_ports):
         super().__init__(name, num_ports)
-        self.mac_table = {} # {mac : (interface, vlan_id)}
+        self.mac_table = {}  # {mac : (interface, vlan_id)}
         self.vlans = set()
 
         # Initialize all ports with empty interface attributes, no connections, and default vlan configuration
@@ -679,17 +1091,26 @@ class Switch(Node):
 
         self.mac_table[frame.source_mac] = (ingress_interface, vid)
 
-        if frame.dest_mac in self.mac_table and self.mac_table[frame.dest_mac][1] == vid:
+        if (
+            frame.dest_mac in self.mac_table
+            and self.mac_table[frame.dest_mac][1] == vid
+        ):
             self.process_frame_out(frame, self.mac_table[frame.dest_mac][0], vid)
         else:
-            for self_interface, other_interface in self.interfaces.items():
-                if isinstance(self_interface, Access_Interface):
-                    if self_interface != ingress_interface and self_interface.vlan_id == vid:
-                        self.tx(frame, self_interface)
+            for self_interface in self.interfaces:
+                if (
+                    isinstance(self_interface, Access_Interface)
+                    and self_interface != ingress_interface
+                    and self_interface.vlan_id == vid
+                ):
+                    self.tx(frame, self_interface)
 
-                if isinstance(self_interface, Trunk_Interface):
-                    if self_interface != ingress_interface and vid in self_interface.allowed_vlans:
-                        self.process_frame_out(frame, self_interface, vid)
+                if (
+                    isinstance(self_interface, Trunk_Interface)
+                    and self_interface != ingress_interface
+                    and vid in self_interface.allowed_vlans
+                ):
+                    self.process_frame_out(frame, self_interface, vid)
 
     def process_frame_out(self, frame, egress_interface, vid):
         if isinstance(egress_interface, Access_Interface):
@@ -719,238 +1140,15 @@ class Switch(Node):
         interface.native_vlan = vlan_id
         interface.allowed_vlans.add(vlan_id)
 
-        
     def flood(self, frame, ingress_interface):
         if isinstance(ingress_interface, Access_Interface):
             # Iterate through all connections
             for self_interface, other_interface in self.interfaces.items():
                 # Transmit frame out of all interfaces with same VLAN ID except the ingress interface it was received on
-                if self_interface.vlan_id == ingress_interface.vlan_id \
-                    and self_interface.id != ingress_interface.id \
-                    and other_interface is not None:
+                if (
+                    self_interface.vlan_id == ingress_interface.vlan_id
+                    and self_interface.id != ingress_interface.id
+                    and other_interface is not None
+                ):
                     self.tx(frame, self_interface)
-
-================================================================================
-FILE: test_network.py
-================================================================================
-
-from node import Node
-from other import *
-from host import Host
-from router import Router
-from switch import Switch
-import pytest
-
-
-def test_initializes_correct_num_interfaces():
-    node = Host("N1", 8)
-    assert len(node.interfaces) == 8
-
-
-def test_assigns_correct_interface_ids():
-    node = Host("N1", 8)
-    i = 0
-    for interface in node.interfaces:
-        assert interface.id == i
-        i += 1
-
-
-def test_port_map_contains_correct_interfaces():
-    node = Host("N1", 8)
-    for port, interface in node.port_map.items():
-        assert port == interface.id
-
-
-def test_interfaces_start_with_no_connections():
-    node = Host("N1", 8)
-    for self_interface in node.interfaces:
-        assert node.interfaces[self_interface] is None
-
-
-def test_connections_create_twoway_connection():
-    node1 = Host("N1", 8)
-    node2 = Host("N2", 4)
-
-    node1.add_connection(1, node2, 3)
-
-    # Node interfaces connect to correct nodes
-    assert node1.interfaces[node1.port_map[1]].node == node2
-    assert node2.interfaces[node2.port_map[3]].node == node1
-
-    # Node interfaces connect to correct ports
-    assert node1.interfaces[node1.port_map[1]].id == 3
-    assert node2.interfaces[node2.port_map[3]].id == 1
-
-
-def test_host_to_host_communication():
-    PC1 = Host("PC1", 1)
-    PC2 = Host("PC2", 1)
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("10.0.0.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("10.0.0.2"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC1.add_connection(0, PC2, 0)
-
-    PC1.send_message("test", 0, IP("10.0.0.2"))
-
-    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
-
-
-def test_inter_subnet_routing():
-    # LAN 1
-    PC1 = Host("PC3", 1)
-    SW1 = Switch("SW1", 8)
-
-    # LAN 2
-    PC2 = Host("PC2", 1)
-    SW2 = Switch("SW2", 4)
-
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
-
-    R1 = Router("R1", 4)
-    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
-    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("192.168.2.254"), IP("255.255.255.0"))
-
-    PC1.add_connection(0, SW1, 0)
-    PC2.add_connection(0, SW2, 0)
-
-    SW1.add_connection(1, R1, 0)
-    SW2.add_connection(1, R1, 1)
-
-    PC1.send_message("test", 0, IP("192.168.2.1"))
-    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
-
-
-def test_static_routing():
-    # LAN 1
-    PC1 = Host("PC3", 1)
-    SW1 = Switch("SW1", 8)
-
-    # LAN 2
-    PC2 = Host("PC2", 1)
-    SW2 = Switch("SW2", 4)
-
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
-    R1 = Router("R1", 4)
-    R1.assign_all_int_attributes(0, "zzzz.zzzz.zzzz", IP("192.168.1.254"), IP("255.255.255.0"))
-    R1.assign_all_int_attributes(1, "yyyy.yyyy.yyyy", IP("1.1.1.253"), IP("255.255.255.252"))
-
-    R2 = Router("R2", 4)
-    R2.assign_all_int_attributes(0, "xxxx.xxxx.xxxx", IP("192.168.2.254"), IP("255.255.255.0"))
-    R2.assign_all_int_attributes(1, "wwww.wwww.wwww", IP("1.1.1.254"), IP("255.255.255.252"))
-
-    PC1.add_connection(0, SW1, 0)
-    PC2.add_connection(0, SW2, 0)
-
-    SW1.add_connection(1, R1, 0)
-    SW2.add_connection(1, R2, 0)
-
-    R1.add_connection(1, R2, 1)
-
-    R1.add_static_route(IP("192.168.2.0"), IP("255.255.255.0"), IP("1.1.1.254"))
-    R2.add_static_route(IP("192.168.1.0"), IP("255.255.255.0"), IP("1.1.1.253"))
-
-    PC1.send_message("test", 0, IP("192.168.2.1"))
-    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
-
-
-def test_no_cross_vlan_switching():
-    # VLAN 10
-    PC1 = Host("PC1", 1)
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    # VLAN 20
-    PC2 = Host("PC2", 1)
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    SW1 = Switch("SW1", 8)
-    SW1.add_vlan(10, 20)
-    SW1.port_map[0].vlan_id = 10
-    SW1.port_map[1].vlan_id = 20
-
-    PC1.add_connection(0, SW1, 0)
-    PC2.add_connection(0, SW1, 1)
-
-    PC1.send_message("test", 0, IP("192.168.1.2"))
-    assert not PC2.rx_buffer
-
-
-def test_same_vlan_switching():
-    # VLAN 10
-    PC1 = Host("PC1", 1)
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    # VLAN 20
-    PC2 = Host("PC2", 1)
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    SW1 = Switch("SW1", 8)
-    SW1.add_vlan(10, 20)
-    SW1.port_map[0].vlan_id = 10
-    SW1.port_map[1].vlan_id = 10
-
-    PC1.add_connection(0, SW1, 0)
-    PC2.add_connection(0, SW1, 1)
-
-    PC1.send_message("test", 0, IP("192.168.1.2"))
-    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test"
-
-
-def test_broadcast_storm():
-    with pytest.raises(RecursionError):
-        # VLAN 10
-        PC1 = Host("PC3", 1)
-        PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-        # VLAN 20
-        PC2 = Host("PC2", 1)
-        PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
-        SW1 = Switch("SW1", 4)
-        SW2 = Switch("SW1", 4)
-        SW3 = Switch("SW1", 4)
-
-        PC1.add_connection(0, SW1, 0)
-        PC2.add_connection(0, SW2, 0)
-
-        SW1.add_connection(1, SW2, 1)
-        SW2.add_connection(2, SW3, 0)
-        SW3.add_connection(1, SW1, 2)
-
-        PC1.send_message("test", 0, IP("192.168.2.1"))
-
-def test_trunkport_switching():
-    # VLAN 10
-    PC1 = Host("PC1", 1)
-    PC1.assign_all_int_attributes(0, "aaaa.aaaa.aaaa", IP("192.168.1.1"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    PC2 = Host("PC2", 1)
-    PC2.assign_all_int_attributes(0, "bbbb.bbbb.bbbb", IP("192.168.1.2"), IP("255.255.255.0"), IP("192.168.1.254"))
-
-    # VLAN 20
-    PC3 = Host("PC3", 1)
-    PC3.assign_all_int_attributes(0, "cccc.cccc.cccc", IP("192.168.2.1"), IP("255.255.255.0"), IP("192.168.2.254"))
-
-    SW1 = Switch("SW1", 8)
-    SW1.add_vlan(10)
-    SW1.set_interface_trunk(1)
-    SW1.set_allowed_vlans(1, 10)
-    SW1.port_map[0].vlan_id = 10
-
-    SW2 = Switch("SW2", 8)
-    SW2.add_vlan(10, 20)
-    SW2.port_map[0].vlan_id = 10
-    SW2.set_interface_trunk(1)
-    SW2.set_allowed_vlans(1, 10)
-    SW2.port_map[2].vlan_id = 20
-
-    PC1.add_connection(0, SW1, 0)
-    PC2.add_connection(0, SW2, 0)
-    PC3.add_connection(0, SW2, 2)
-    SW1.add_connection(1, SW2, 1)
-
-    PC1.send_message("test", 0, IP("192.168.1.2"))
-    assert PC2.rx_buffer[PC2.port_map[0]][0].payload.payload == "test" and not PC3.rx_buffer
 
